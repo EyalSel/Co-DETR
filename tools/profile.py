@@ -27,7 +27,8 @@ from projects import *
 
 warmup_iters = 10
 profile_iters = 10
-
+# resolution = (1280, 1920)
+resolution = (640, 960)
 
 class RandomImages(FakeData):
     CLASSES = [1, 2, 3]
@@ -37,15 +38,15 @@ class RandomImages(FakeData):
         img = img.type(torch.float32)
         d = {'filename': 'fake_image',
              'ori_filename': 'fake_img',
-             'ori_shape': (1280, 1920, 3),
-             'img_shape': (1280, 1920, 3),
-             'pad_shape': (1280, 1920, 3),
+             'ori_shape': (*resolution, 3),
+             'img_shape': (*resolution, 3),
+             'pad_shape': (*resolution, 3),
              'scale_factor': np.array([1, 1, 1, 1], dtype=np.float32),
              'flip': False,
              'flip_direction': None,
              'img_norm_cfg': {'mean': np.array([123.675, 116.28, 103.53], dtype=np.float32),
                               'std': np.array([58.395, 57.12, 57.375], dtype=np.float32), 'to_rgb': True},
-             'batch_input_shape': (1280, 1920)}
+             'batch_input_shape': resolution}
         d = DataContainer(d, cpu_only=True)
         return {"img": [img], "img_metas": [d]}
 
@@ -244,7 +245,7 @@ def main():
 
     # build the dataloader
     # dataset = build_dataset(cfg.data.test)
-    dataset = RandomImages(1000, (3, 1280, 1920))
+    dataset = RandomImages(1000, (3, *resolution))
     data_loader = build_dataloader(dataset, **test_loader_cfg)
 
     # build the model and load checkpoint
