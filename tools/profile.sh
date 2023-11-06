@@ -9,4 +9,4 @@ PORT=${PORT:-29500}
 
 
 PYTHONPATH="$(dirname $0)/..":$PYTHONPATH \
-python tools/test.py $CONFIG $CHECKPOINT ${@:4}
+python tools/profile.py $CONFIG $CHECKPOINT ${@:4}
