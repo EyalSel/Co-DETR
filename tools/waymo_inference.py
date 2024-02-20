@@ -9,7 +9,6 @@ from pathlib import Path
 
 import mmcv
 import torch
-import torchvision
 from mmcv import Config, DictAction
 from mmcv.cnn import fuse_conv_bn
 from mmcv.parallel.data_container import DataContainer
@@ -18,17 +17,15 @@ from mmcv.runner import (get_dist_info, init_dist, load_checkpoint,
 from torch.utils.data import Dataset
 from tqdm import tqdm
 
-from mmdet.apis import multi_gpu_test, single_gpu_test
-from mmdet.datasets import (build_dataloader, build_dataset,
-                            replace_ImageToTensor)
+from mmdet.datasets import build_dataloader, replace_ImageToTensor
 from mmdet.datasets.coco import CocoDataset
 from mmdet.models import build_detector
-from mmdet.utils import (build_ddp, build_dp, compat_cfg, get_device,
-                         replace_cfg_vals, setup_multi_processes,
-                         update_data_root)
+from mmdet.utils import (build_dp, compat_cfg, get_device, replace_cfg_vals,
+                         setup_multi_processes, update_data_root)
 from projects import *
 
 resolution = (1280, 1920)
+
 
 class OfflineWaymoSensorV1_1():
     """
@@ -48,9 +45,9 @@ class OfflineWaymoSensorV1_1():
 
 
 class WaymoDataset(Dataset):
-    
+
     CLASSES = CocoDataset.CLASSES
-    PALETTE  = CocoDataset.PALETTE
+    PALETTE = CocoDataset.PALETTE
 
     def __init__(self, scenario_path) -> None:
         self.scenario_path = Path(scenario_path)
@@ -58,27 +55,33 @@ class WaymoDataset(Dataset):
         self.reader = OfflineWaymoSensorV1_1(scenario_path)
 
     def __getitem__(self, index):
-        d = {'filename': self.scenario_name+f"-{index}.jpg",
-             'ori_filename': self.scenario_name+f"-{index}.jpg",
-             'ori_shape': (*resolution, 3),
-             'img_shape': (*resolution, 3),
-             'pad_shape': (*resolution, 3),
-             'scale_factor': np.array([1, 1, 1, 1], dtype=np.float32),
-             'flip': False,
-             'flip_direction': None,
-             'img_norm_cfg': {'mean': np.array([123.675, 116.28, 103.53], dtype=np.float32),
-                              'std': np.array([58.395, 57.12, 57.375], dtype=np.float32), 'to_rgb': True},
-             'batch_input_shape': resolution}
+        d = {
+            'filename': self.scenario_name + f"-{index}.jpg",
+            'ori_filename': self.scenario_name + f"-{index}.jpg",
+            'ori_shape': (*resolution, 3),
+            'img_shape': (*resolution, 3),
+            'pad_shape': (*resolution, 3),
+            'scale_factor': np.array([1, 1, 1, 1], dtype=np.float32),
+            'flip': False,
+            'flip_direction': None,
+            'img_norm_cfg': {
+                'mean': np.array([123.675, 116.28, 103.53], dtype=np.float32),
+                'std': np.array([58.395, 57.12, 57.375], dtype=np.float32),
+                'to_rgb': True
+            },
+            'batch_input_shape': resolution
+        }
         img = self.reader.get_frame(index)["center_camera_feed"]
         img = img.transpose([2, 0, 1])
         # bgr to rgb
         img = img[::-1, :, :]
         img = img.astype(np.float32)
-        img = (img - np.array([123.675, 116.28, 103.53]).reshape([-1, 1, 1])) / np.array([58.395, 57.12, 57.375]).reshape([-1, 1, 1])
+        img = (img - np.array([123.675, 116.28, 103.53]).reshape([-1, 1, 1])
+              ) / np.array([58.395, 57.12, 57.375]).reshape([-1, 1, 1])
         img = img.astype(np.float32)
         d = DataContainer(d, cpu_only=True)
         return {"img": [img], "img_metas": [d]}
-    
+
     def __len__(self):
         return self.reader.total_num_frames()
 
@@ -106,15 +109,14 @@ def show_preds(data, result, out_dir, model, PALETTE, show, show_score_thr):
         else:
             out_file = None
 
-        model.module.show_result(
-            img_show,
-            result[i],
-            bbox_color=PALETTE,
-            text_color=PALETTE,
-            mask_color=PALETTE,
-            show=show,
-            out_file=out_file,
-            score_thr=show_score_thr)
+        model.module.show_result(img_show,
+                                 result[i],
+                                 bbox_color=PALETTE,
+                                 text_color=PALETTE,
+                                 mask_color=PALETTE,
+                                 show=show,
+                                 out_file=out_file,
+                                 score_thr=show_score_thr)
 
 
 def parse_args():
@@ -137,12 +139,11 @@ def parse_args():
         nargs='+',
         help='(Deprecated, please use --gpu-id) ids of gpus to use '
         '(only applicable to non-distributed training)')
-    parser.add_argument(
-        '--gpu-id',
-        type=int,
-        default=0,
-        help='id of gpu to use '
-        '(only applicable to non-distributed testing)')
+    parser.add_argument('--gpu-id',
+                        type=int,
+                        default=0,
+                        help='id of gpu to use '
+                        '(only applicable to non-distributed testing)')
     parser.add_argument(
         '--format-only',
         action='store_true',
@@ -156,17 +157,15 @@ def parse_args():
         help='evaluation metrics, which depends on the dataset, e.g., "bbox",'
         ' "segm", "proposal" for COCO, and "mAP", "recall" for PASCAL VOC')
     parser.add_argument('--show', action='store_true', help='show results')
-    parser.add_argument(
-        '--show-dir', help='directory where painted images will be saved')
-    parser.add_argument(
-        '--show-score-thr',
-        type=float,
-        default=0.3,
-        help='score threshold (default: 0.3)')
-    parser.add_argument(
-        '--gpu-collect',
-        action='store_true',
-        help='whether to use gpu to collect results.')
+    parser.add_argument('--show-dir',
+                        help='directory where painted images will be saved')
+    parser.add_argument('--show-score-thr',
+                        type=float,
+                        default=0.3,
+                        help='score threshold (default: 0.3)')
+    parser.add_argument('--gpu-collect',
+                        action='store_true',
+                        help='whether to use gpu to collect results.')
     parser.add_argument(
         '--tmpdir',
         help='tmp directory used for collecting results from multiple '
@@ -194,11 +193,10 @@ def parse_args():
         action=DictAction,
         help='custom options for evaluation, the key-value pair in xxx=yyy '
         'format will be kwargs for dataset.evaluate() function')
-    parser.add_argument(
-        '--launcher',
-        choices=['none', 'pytorch', 'slurm', 'mpi'],
-        default='none',
-        help='job launcher')
+    parser.add_argument('--launcher',
+                        choices=['none', 'pytorch', 'slurm', 'mpi'],
+                        default='none',
+                        help='job launcher')
     parser.add_argument('--local_rank', type=int, default=0)
     args = parser.parse_args()
     if 'LOCAL_RANK' not in os.environ:
@@ -281,8 +279,10 @@ def main():
         init_dist(args.launcher, **cfg.dist_params)
 
     BATCHSIZE = 1
-    test_dataloader_default_args = dict(
-        samples_per_gpu=BATCHSIZE, workers_per_gpu=2, dist=distributed, shuffle=False)
+    test_dataloader_default_args = dict(samples_per_gpu=BATCHSIZE,
+                                        workers_per_gpu=2,
+                                        dist=distributed,
+                                        shuffle=False)
 
     # in case the test dataset is concatenated
     if isinstance(cfg.data.test, dict):
@@ -312,7 +312,8 @@ def main():
 
     # build the dataloader
     # dataset = build_dataset(cfg.data.test)
-    dataset = WaymoDataset("../ad-config-search/waymo_pl/training00_05/training_0003/S12.pl")
+    dataset = WaymoDataset(
+        "../ad-config-search/waymo_pl/training00_05/training_0003/S12.pl")
     data_loader = build_dataloader(dataset, **test_loader_cfg)
 
     # build the model and load checkpoint
@@ -338,7 +339,6 @@ def main():
 
     model.eval()
 
-
     all_preds = []
     for data in tqdm(data_loader):
         with torch.no_grad():
@@ -348,15 +348,20 @@ def main():
                            args.show, args.show_score_thr)
         for frame_preds in result:
             frame_preds = np.concatenate([
-                np.concatenate([np.full(len(boxes), -1).reshape(-1, 1),
-                                boxes,
-                                np.full(len(boxes), i).reshape(-1, 1)], axis=1)
-                for i, boxes in enumerate(frame_preds)], axis=0)
-            frame_preds = frame_preds[np.argsort(frame_preds[:, 4])[::-1]][:100]
+                np.concatenate([
+                    np.full(len(boxes), -1).reshape(-1, 1), boxes,
+                    np.full(len(boxes), i).reshape(-1, 1)
+                ],
+                               axis=1) for i, boxes in enumerate(frame_preds)
+            ],
+                                         axis=0)
+            frame_preds = frame_preds[np.argsort(frame_preds[:,
+                                                             4])[::-1]][:100]
             all_preds.append(frame_preds)
     all_preds = np.array(all_preds)
     all_preds = all_preds[:, [0, 2, 1, 4, 3, 5, 6]]
     np.save("scenario", all_preds)
+
 
 if __name__ == '__main__':
     main()
