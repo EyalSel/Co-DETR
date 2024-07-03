@@ -2,7 +2,6 @@
 import argparse
 import os
 import os.path as osp
-import pickle
 import time
 import warnings
 from itertools import product
@@ -11,6 +10,8 @@ from pathlib import Path
 import cv2
 import mmcv
 import torch
+from copied_functions import (FractioningSchema, FrameFraction,
+                              OfflineWaymoSensorV1_1, scenario_to_path)
 from mmcv import Config, DictAction
 from mmcv.cnn import fuse_conv_bn
 from mmcv.parallel.data_container import DataContainer
@@ -27,51 +28,6 @@ from mmdet.utils import (build_dp, compat_cfg, get_device, replace_cfg_vals,
 from projects import *
 
 resolution = (1280, 1920)
-
-
-class OfflineWaymoSensorV1_1():
-    """
-    Same as version 1 except _child_index_dir is run offline first
-    """
-
-    def __init__(self, data_path):
-        with open(data_path, 'rb') as handle:
-            dicts = pickle.load(handle)
-        self.all_data = dicts
-
-    def total_num_frames(self):
-        return len(self.all_data)
-
-    def get_frame(self, frame_index):
-        return self.all_data[frame_index]
-
-
-class FrameFraction:
-    """
-    Specifies the crop location in the frame, as well as the final height and
-    scale that the crop should be resized to.
-    """
-
-    def __init__(self, ymin, xmin, ymax, xmax, height=None, width=None):
-        self.ymin = ymin
-        self.xmin = xmin
-        self.ymax = ymax
-        self.xmax = xmax
-        self.height = height
-        self.width = width
-
-
-class FractioningSchema:
-    """
-    Abstract parent class.
-    """
-
-    def get_split_specs(self, h, w):
-        """
-        Takes frame height and width and returns a list of FrameFraction
-        instances.
-        """
-        raise NotImplementedError("Implemented by child class")
 
 
 class EqualFractions(FractioningSchema):
@@ -277,7 +233,6 @@ class WaymoDataset(Dataset):
         return {"img": [img], "img_metas": [d]}
 
     def __len__(self):
-        return 1
         return self.reader.total_num_frames()
 
 
@@ -388,6 +343,9 @@ def parse_args():
         action=DictAction,
         help='custom options for evaluation, the key-value pair in xxx=yyy '
         'format will be kwargs for dataset.evaluate() function')
+    parser.add_argument('--scenarios',
+                        nargs='+',
+                        help='Waymo scenarios to process')
     parser.add_argument('--launcher',
                         choices=['none', 'pytorch', 'slurm', 'mpi'],
                         default='none',
@@ -505,12 +463,6 @@ def main():
         timestamp = time.strftime('%Y%m%d_%H%M%S', time.localtime())
         json_file = osp.join(args.work_dir, f'eval_{timestamp}.json')
 
-    # build the dataloader
-    # dataset = build_dataset(cfg.data.test)
-    dataset = WaymoDataset(
-        "../ad-config-search/waymo_pl/training00_05/training_0003/S12.pl")
-    data_loader = build_dataloader(dataset, **test_loader_cfg)
-
     # build the model and load checkpoint
     cfg.model.train_cfg = None
     model = build_detector(cfg.model, test_cfg=cfg.get('test_cfg'))
@@ -525,7 +477,8 @@ def main():
     if 'CLASSES' in checkpoint.get('meta', {}):
         model.CLASSES = checkpoint['meta']['CLASSES']
     else:
-        model.CLASSES = dataset.CLASSES
+        # model.CLASSES = dataset.CLASSES
+        model.CLASSES = CocoDataset.CLASSES
 
     # TODO: replace data_loader with a random image dataloader
 
@@ -534,6 +487,7 @@ def main():
 
     model.eval()
 
+    # UNIT TESTS
     # baseline
     # split_specs = EqualFractions((1, 1), (0, 0), False)
     # split_specs = split_specs.get_split_specs(1280, 1920)
@@ -546,13 +500,16 @@ def main():
     #     FrameFraction(0, 960-60, 1280, 1920, None, None)
     # ]
     # crop + scale
-    split_specs = EqualFractions((4, 4), (60, 60), True)
+    sharding_schema = "full_frame"
+    split_specs = {
+        "full_frame": EqualFractions((1, 1), (0, 0), False),
+        "quarters": EqualFractions((2, 2), (30, 30), False),
+        "16ths": EqualFractions((4, 4), (30, 30), True)
+    }[sharding_schema]
     split_specs = split_specs.get_split_specs(1280, 1920)
 
     run_model_fn = run_split_specs_fn(
         lambda x: model(return_loss=False, rescale=True, **x), split_specs)
-
-    all_preds = []
 
     # for data in tqdm(data_loader):
     #     with torch.no_grad():
@@ -564,15 +521,33 @@ def main():
     #         frame_preds = convert_codetr_result_to_edet_format(frame_preds)
     #         all_preds.append(frame_preds)
 
-    for data in tqdm(data_loader):
-        with torch.no_grad():
-            frame_preds = run_model_fn(data)
-            # show_preds(data, frame_preds, args.show_dir, model,
-            #            dataset.PALETTE, args.show, args.show_score_thr)
-            all_preds.append(frame_preds)
+    # build the dataloader
+    # dataset = build_dataset(cfg.data.test)
 
-    all_preds = np.array(all_preds)
-    np.save("scenario", all_preds)
+    base_path = Path("waymo-co_detr-predictions")
+    base_path.mkdir(exist_ok=True)
+    model_name = Path(args.config).stem
+    for scenario in args.scenarios:
+        fn = f"preds--{scenario}__{model_name}"
+        if (base_path / (fn + ".npy")).exists():
+            print("Skipping", scenario)
+            continue
+        # scenario = "training_0003-S12"
+        print(scenario)
+        dataset = WaymoDataset(
+            Path("../ad-config-search") / scenario_to_path(scenario, "waymo"))
+        data_loader = build_dataloader(dataset, **test_loader_cfg)
+        all_preds = []
+
+        for data in tqdm(data_loader):
+            with torch.no_grad():
+                frame_preds = run_model_fn(data)
+                # show_preds(data, frame_preds, args.show_dir, model,
+                #            dataset.PALETTE, args.show, args.show_score_thr)
+                all_preds.append(frame_preds)
+
+        all_preds = np.array(all_preds)
+        np.save(str(base_path / fn), all_preds)
 
 
 if __name__ == '__main__':
