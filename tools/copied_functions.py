@@ -6,6 +6,7 @@ environment and slow down development. This should be addressed at some point.
 import pickle
 import re
 from pathlib import Path
+from google.cloud import storage
 
 
 def waymo_scenario_to_tuple(video_segment_str):
@@ -142,3 +143,24 @@ class FractioningSchema:
         instances.
         """
         raise NotImplementedError("Implemented by child class")
+
+
+def sync_from_google_storage(base_path, path, directory=False):
+    """
+    Download a file in path in ad-config-search's bucket saved in google cloud
+    """
+    path = str(path)
+    if (Path(base_path) / path).exists():
+        return
+    print(f"Downloading {path} from google cloud...")
+    client = storage.Client.from_service_account_json(
+        "erdos-policy-b090169b4a6a.json", project="erdos-policy")
+    bucket = client.bucket("ad-config-search")
+    blob = bucket.blob(path)
+    p = Path(base_path) / path
+    if directory:
+        to_make = p
+    else:
+        to_make = p.parent
+    to_make.mkdir(parents=True, exist_ok=True)
+    blob.download_to_filename(str(p))

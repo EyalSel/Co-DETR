@@ -11,7 +11,8 @@ import cv2
 import mmcv
 import torch
 from copied_functions import (FractioningSchema, FrameFraction,
-                              OfflineWaymoSensorV1_1, scenario_to_path)
+                              OfflineWaymoSensorV1_1, scenario_to_path,
+                              sync_from_google_storage)
 from mmcv import Config, DictAction
 from mmcv.cnn import fuse_conv_bn
 from mmcv.parallel.data_container import DataContainer
@@ -534,8 +535,9 @@ def main():
             continue
         # scenario = "training_0003-S12"
         print(scenario)
-        dataset = WaymoDataset(
-            Path("../ad-config-search") / scenario_to_path(scenario, "waymo"))
+        pl_path = scenario_to_path(scenario, "waymo")
+        sync_from_google_storage("../ad-config-search", pl_path)
+        dataset = WaymoDataset(Path("../ad-config-search") / pl_path)
         data_loader = build_dataloader(dataset, **test_loader_cfg)
         all_preds = []
 
