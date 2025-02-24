@@ -481,6 +481,51 @@ def main():
         # model.CLASSES = dataset.CLASSES
         model.CLASSES = CocoDataset.CLASSES
 
+    # THIS COMMENTED OUT CODE WAS USED FOR PROFILING THE MODEL'S FLOPS
+    # model.eval()
+    # # breakpoint()
+    # d = {
+    #     'filename': "training_0000-S0" + f"-{0}.jpg",
+    #     'ori_filename': "training_0000-S0" + f"-{0}.jpg",
+    #     'ori_shape': (*resolution, 3),
+    #     'img_shape': (*resolution, 3),
+    #     'pad_shape': (*resolution, 3),
+    #     'scale_factor': np.array([1, 1, 1, 1], dtype=np.float32),
+    #     'flip': False,
+    #     'flip_direction': None,
+    #     'img_norm_cfg': {
+    #         'mean': np.array([123.675, 116.28, 103.53], dtype=np.float32),
+    #         'std': np.array([58.395, 57.12, 57.375], dtype=np.float32),
+    #         'to_rgb': True
+    #     },
+    #     'batch_input_shape': resolution
+    # }
+    # d = DataContainer(d, cpu_only=True)
+    # img_metas = [d]
+
+    # from mmcv.cnn import get_model_complexity_info
+
+    # old_function = model.forward
+
+    # def fake_forward(x):
+    #     return old_function([x],
+    #                         return_loss=False,
+    #                         rescale=True,
+    #                         img_metas=img_metas)
+
+    # model.forward = fake_forward
+    # result = get_model_complexity_info(model, input_shape=(1, 3, 1280, 1920))
+    # breakpoint()
+    # from calflops import calculate_flops
+    # flops, macs, params = calculate_flops(model=partial(model,
+    #                                                     return_loss=False,
+    #                                                     rescale=True,
+    #                                                     img_metas=img_metas),
+    #                                       input_shape=(1, 3, 1280, 1920),
+    #                                       output_as_string=True,
+    #                                       output_precision=4)
+    # breakpoint()
+
     # TODO: replace data_loader with a random image dataloader
 
     assert not distributed, "This script should run on a single GPU"
@@ -536,8 +581,12 @@ def main():
         # scenario = "training_0003-S12"
         print(scenario)
         pl_path = scenario_to_path(scenario, "waymo")
-        sync_from_google_storage("../ad-config-search", pl_path)
-        dataset = WaymoDataset(Path("../ad-config-search") / pl_path)
+        full_path = Path("../ad-config-search") / pl_path
+        path_exists = full_path.exists()
+        if not path_exists:
+            print("Syncing", scenario)
+            sync_from_google_storage("../ad-config-search", pl_path)
+        dataset = WaymoDataset(full_path)
         data_loader = build_dataloader(dataset, **test_loader_cfg)
         all_preds = []
 
@@ -550,6 +599,11 @@ def main():
 
         all_preds = np.array(all_preds)
         np.save(str(base_path / fn), all_preds)
+
+        # Delete the scenario if it was downloaded
+        if not path_exists:
+            print("Deleting", scenario)
+            full_path.unlink()
 
 
 if __name__ == '__main__':
