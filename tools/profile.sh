@@ -9,4 +9,4 @@ PORT=${PORT:-29500}
 
 
 PYTHONPATH="$(dirname $0)/..":$PYTHONPATH \
-python tools/profile.py $CONFIG $CHECKPOINT ${@:4}
+python tools/profile_latency.py $CONFIG $CHECKPOINT ${@:4}
