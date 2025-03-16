@@ -1,3 +1,19 @@
+"""
+This script creates 16 separate shell scripts for running inference on Waymo
+scenarios.
+It:
+1. Reads scenarios from a hardcoded JSON file (waymo_scenarios.json)
+2. Splits them evenly across 16 scripts (for parallel processing)
+3. Creates shell scripts with appropriate commands and scenarios
+4. Makes the scripts executable
+
+The generated scripts will be named inference_part_1.sh through
+inference_part_16.sh.
+Each script runs the waymo_inference.sh script with a subset of scenarios.
+
+These scripts are then packaged for submission to the SLURM scheduler using
+generate_slurm_script.py.
+"""
 import json
 import math
 
