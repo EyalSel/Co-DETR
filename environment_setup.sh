@@ -25,3 +25,4 @@ pip install timm
 pip install einops
 pip install numpy==1.21.6
 pip install matplotlib==3.5.3
+pip install opencv-python==4.8.1.78

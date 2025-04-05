@@ -3,10 +3,17 @@ This is functionality that's copy-pasted from the EfficientDet-Inference repo.
 Doing this avoids doing a pip install, which might ruin the current co-detr
 environment and slow down development. This should be addressed at some point.
 """
+import multiprocessing
 import pickle
 import re
 from pathlib import Path
+
+import cv2
+import numpy as np
 from google.cloud import storage
+
+cv2.setNumThreads(0)
+multiprocessing.set_start_method('spawn', force=True)
 
 
 def waymo_scenario_to_tuple(video_segment_str):
@@ -71,7 +78,7 @@ def scenario_to_path(scenario_str, dataset="waymo"):
             run_path = "argo_qdtrack/argo_{}_qdtrack_as_label/{}.pl".format(
                 sector_number, segment)
     elif dataset == "MEVA":
-        with open("meva_dataset_lookup.pl", 'rb') as f:
+        with open("dataset_scenarios/meva_dataset_lookup.pl", 'rb') as f:
             lookup = pickle.load(f)
         split, scenario = scenario_str.split("--")
         run_path = lookup[scenario + ".avi"] + "/" + scenario + ".avi"
@@ -115,6 +122,82 @@ class OfflineWaymoSensorV1_1():
 
     def get_frame(self, frame_index):
         return self.all_data[frame_index]
+
+
+class MEVASensor:
+
+    def __init__(self, data_path):
+        cap = cv2.VideoCapture(str(data_path))
+        self.cap = cap
+        self.total_length = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+
+    def total_num_frames(self):
+        return self.total_length
+
+    def get_frame(self, frame_index):
+        self.cap.set(cv2.CAP_PROP_POS_FRAMES, frame_index)
+        ret, frame = self.cap.read()
+        assert ret, frame_index
+        return {"center_camera_feed": frame}
+
+    def __del__(self):
+        self.cap.release()
+
+
+class JpgDirectorySensor:
+
+    def __init__(self,
+                 data_path,
+                 clean_fn=lambda x: x.replace("img", ""),
+                 eager=True):
+        data_path = Path(data_path)
+        self.all_jpgs = sorted(data_path.glob("*.jpg"),
+                               key=lambda x: int(clean_fn(x.stem)))
+        if eager:
+            self.frames = [
+                cv2.imread(str(x)).astype(np.uint8) for x in self.all_jpgs
+            ]
+        else:
+            self.frames = {}
+        self.eager = eager
+
+    def total_num_frames(self):
+        return len(self.all_jpgs)
+
+    def get_frame(self, frame_index):
+        if self.eager or frame_index in self.frames:
+            return {"center_camera_feed": self.frames[frame_index]}
+        else:
+            self.frames[frame_index] = cv2.imread(
+                str(self.all_jpgs[frame_index])).astype(np.uint8)
+            return {"center_camera_feed": self.frames[frame_index]}
+
+
+dataset_readers = {
+    "waymo": OfflineWaymoSensorV1_1,
+    "argoverse": OfflineWaymoSensorV1_1,
+    "MEVA": MEVASensor,
+    "visdrone": JpgDirectorySensor,
+}
+
+dataset_resolutions = {
+    "waymo": (1280, 1920),
+    "argoverse": (1280, 1920),
+    "MEVA": (1072, 1920),
+    "visdrone": (1512, 2688),
+}
+
+def dataset_scenarios_location(dataset):
+    """
+    Returns the path to the scenarios file for a given dataset.
+    """
+    json_file = {
+        "waymo": "waymo_scenarios.json",
+        "argoverse": "argoverse_scenarios.json",
+        "MEVA": "MEVA_scenarios.json",
+        "visdrone": "visdrone_scenarios.json",
+    }
+    return Path("dataset_scenarios") / json_file[dataset]
 
 
 class FrameFraction:

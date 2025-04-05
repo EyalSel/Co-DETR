@@ -9,4 +9,4 @@ PORT=${PORT:-29500}
 
 
 PYTHONPATH="$(dirname $0)/..":$PYTHONPATH \
-python tools/waymo_inference.py $CONFIG $CHECKPOINT ${@:4}
+python tools/model_inference.py $CONFIG $CHECKPOINT ${@:4}

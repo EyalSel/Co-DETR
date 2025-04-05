@@ -11,8 +11,8 @@ import cv2
 import mmcv
 import torch
 from copied_functions import (FractioningSchema, FrameFraction,
-                              OfflineWaymoSensorV1_1, scenario_to_path,
-                              sync_from_google_storage)
+                              dataset_readers, dataset_resolutions,
+                              scenario_to_path, sync_from_google_storage)
 from mmcv import Config, DictAction
 from mmcv.cnn import fuse_conv_bn
 from mmcv.parallel.data_container import DataContainer
@@ -27,8 +27,6 @@ from mmdet.models import build_detector
 from mmdet.utils import (build_dp, compat_cfg, get_device, replace_cfg_vals,
                          setup_multi_processes, update_data_root)
 from projects import *
-
-resolution = (1280, 1920)
 
 
 class EqualFractions(FractioningSchema):
@@ -189,23 +187,25 @@ def run_split_specs_fn(run_fn, split_specs):
     return fn
 
 
-class WaymoDataset(Dataset):
+class CustomDataset(Dataset):
 
     CLASSES = CocoDataset.CLASSES
     PALETTE = CocoDataset.PALETTE
 
-    def __init__(self, scenario_path) -> None:
+    def __init__(self, dataset, scenario_path) -> None:
+        self.dataset = dataset
         self.scenario_path = Path(scenario_path)
         self.scenario_name = self.scenario_path.parent.name + "-" + self.scenario_path.stem
-        self.reader = OfflineWaymoSensorV1_1(scenario_path)
+        self.reader = dataset_readers[dataset](scenario_path)
+        self.dataset_resolution = dataset_resolutions[dataset]
 
     def __getitem__(self, index):
         d = {
             'filename': self.scenario_name + f"-{index}.jpg",
             'ori_filename': self.scenario_name + f"-{index}.jpg",
-            'ori_shape': (*resolution, 3),
-            'img_shape': (*resolution, 3),
-            'pad_shape': (*resolution, 3),
+            'ori_shape': (*self.dataset_resolution, 3),
+            'img_shape': (*self.dataset_resolution, 3),
+            'pad_shape': (*self.dataset_resolution, 3),
             'scale_factor': np.array([1, 1, 1, 1], dtype=np.float32),
             'flip': False,
             'flip_direction': None,
@@ -214,7 +214,7 @@ class WaymoDataset(Dataset):
                 'std': np.array([58.395, 57.12, 57.375], dtype=np.float32),
                 'to_rgb': True
             },
-            'batch_input_shape': resolution
+            'batch_input_shape': self.dataset_resolution
         }
         img = self.reader.get_frame(index)["center_camera_feed"]
         # Code used to unit test frame sharding (with an image of one dog or
@@ -275,6 +275,7 @@ def parse_args():
         description='MMDet test (and eval) a model')
     parser.add_argument('config', help='test config file path')
     parser.add_argument('checkpoint', help='checkpoint file')
+    parser.add_argument('--dataset', help='dataset to process')
     parser.add_argument(
         '--work-dir',
         help='the directory to save the file containing evaluation metrics')
@@ -437,6 +438,15 @@ def main():
                                         workers_per_gpu=2,
                                         dist=distributed,
                                         shuffle=False)
+    
+    # MEVA uses opencv to read images, so we need to set workers_per_gpu to 0
+    # to avoid deadlocks (program just hangs)
+    if args.dataset == "MEVA":
+        # Explicitly setting the default workers_per_gpu to 0
+        test_dataloader_default_args["workers_per_gpu"] = 0
+        # also set the workers_per_gpu in the config because it overrides the
+        # default
+        cfg.data.test_dataloader.workers_per_gpu = 0
 
     # in case the test dataset is concatenated
     if isinstance(cfg.data.test, dict):
@@ -570,7 +580,7 @@ def main():
     # build the dataloader
     # dataset = build_dataset(cfg.data.test)
 
-    base_path = Path("waymo-co_detr-predictions")
+    base_path = Path(f"co_detr-predictions-{args.dataset}")
     base_path.mkdir(exist_ok=True)
     model_name = Path(args.config).stem
     for scenario in args.scenarios:
@@ -578,23 +588,21 @@ def main():
         if (base_path / (fn + ".npy")).exists():
             print("Skipping", scenario)
             continue
-        # scenario = "training_0003-S12"
+
         print(scenario)
-        pl_path = scenario_to_path(scenario, "waymo")
+        pl_path = scenario_to_path(scenario, args.dataset)
         full_path = Path("../ad-config-search") / pl_path
         path_exists = full_path.exists()
         if not path_exists:
             print("Syncing", scenario)
             sync_from_google_storage("../ad-config-search", pl_path)
-        dataset = WaymoDataset(full_path)
+        dataset = CustomDataset(args.dataset, full_path)
         data_loader = build_dataloader(dataset, **test_loader_cfg)
         all_preds = []
 
         for data in tqdm(data_loader):
             with torch.no_grad():
                 frame_preds = run_model_fn(data)
-                # show_preds(data, frame_preds, args.show_dir, model,
-                #            dataset.PALETTE, args.show, args.show_score_thr)
                 all_preds.append(frame_preds)
 
         all_preds = np.array(all_preds)

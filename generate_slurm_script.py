@@ -12,19 +12,19 @@ The script handles configuration like:
 - Working directory (/data/ges/co-detr)
 - Conda environment (co-detr-py310) 
 - Number of GPUs per job (1)
-- Output directory structure
+- Output directory structure ("co-detr-inference-SLURM")
 """
 
 from pathlib import Path
 from tools.slurm_utils import get_slurm_contents
 
 # Create directory for slurm files
-output_dir = Path("co-detr-waymo-inference")
+output_dir = Path("co-detr-inference-SLURM")
 output_dir.mkdir(exist_ok=True)
 
 # Parameters for all jobs
 cd_dir = Path("/data/ges/co-detr")
-output_subdir = "co-detr-waymo-inference"
+output_subdir = str(output_dir.name)
 conda_env = "co-detr-py310"  # Updated conda environment name
 num_gpus = 1
 
