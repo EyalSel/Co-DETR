@@ -1,0 +1,22 @@
+{
+    "codino-vit-l": {
+        "config": "projects/configs/co_dino/co_dino_5scale_vit_large_coco.py",
+        "checkpoint": "model_weights/co_dino_5scale_vit_large_coco.pth"
+    },
+    "codetr-swin-t": {
+        "config": "projects/configs/co_deformable_detr/co_deformable_detr_swin_tiny_3x_coco.py",
+        "checkpoint": "model_weights/co_deformable_detr_swin_tiny_3x_coco.pth"
+    },
+    "codetr-swin-s": {
+        "config": "projects/configs/co_deformable_detr/co_deformable_detr_swin_small_3x_coco.py",
+        "checkpoint": "model_weights/co_deformable_detr_swin_small_3x_coco.pth"
+    },
+    "codetr-swin-b": {
+        "config": "projects/configs/co_deformable_detr/co_deformable_detr_swin_base_3x_coco.py",
+        "checkpoint": "model_weights/co_deformable_detr_swin_base_3x_coco.pth"
+    },
+    "codetr-swin-l": {
+        "config": "projects/configs/co_deformable_detr/co_deformable_detr_swin_large_900q_3x_coco.py",
+        "checkpoint": "model_weights/co_deformable_detr_swin_large_900q_3x_coco.pth"
+    }
+}
