@@ -14,6 +14,8 @@ pip install mmcv_full-1.5.0-cp310-cp310-manylinux1_x86_64.whl
 pip install ipython gpustat
 pip install tqdm
 pip install google-cloud-storage
+pip install absl-py
+pip install more-itertools
 
 # Install dependencies for the model
 pip install terminaltables

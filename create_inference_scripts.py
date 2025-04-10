@@ -16,10 +16,10 @@ These scripts are then packaged for submission to the SLURM scheduler using
 generate_slurm_script.py.
 """
 import json
-import math
 import os
 
 from absl import app, flags
+from more_itertools import distribute
 
 from tools.copied_functions import dataset_scenarios_location
 
@@ -65,16 +65,11 @@ def main(_):
     with open(dataset_scenarios_location(FLAGS.dataset), 'r') as f:
         scenarios = json.load(f)
 
-    # Calculate how many scenarios per script (round up to ensure all scenarios are covered)
-    scenarios_per_script = math.ceil(len(scenarios) / 16)
+    scenarios_per_script = list(distribute(16, scenarios))
 
     # Create 16 scripts
     for i in range(16):
-        start_idx = i * scenarios_per_script
-        end_idx = min((i + 1) * scenarios_per_script, len(scenarios))
-
-        # Get subset of scenarios for this script
-        script_scenarios = scenarios[start_idx:end_idx]
+        script_scenarios = scenarios_per_script[i]
 
         # Create command with space-separated scenarios
         scenarios_str = " ".join(script_scenarios)
