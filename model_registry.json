@@ -1,21 +1,31 @@
 {
+    "codino-vit-l-seg": {
+        "task": "instance_segmentation",
+        "config": "projects/configs/co_dino_vit/co_dino_5scale_vit_large_coco_instance.py",
+        "checkpoint": "model_weights/co_dino_5scale_vit_large_coco.pth"
+    },
     "codino-vit-l": {
+        "task": "detection",
         "config": "projects/configs/co_dino/co_dino_5scale_vit_large_coco.py",
         "checkpoint": "model_weights/co_dino_5scale_vit_large_coco.pth"
     },
     "codetr-swin-t": {
+        "task": "detection",
         "config": "projects/configs/co_deformable_detr/co_deformable_detr_swin_tiny_3x_coco.py",
         "checkpoint": "model_weights/co_deformable_detr_swin_tiny_3x_coco.pth"
     },
     "codetr-swin-s": {
+        "task": "detection",
         "config": "projects/configs/co_deformable_detr/co_deformable_detr_swin_small_3x_coco.py",
         "checkpoint": "model_weights/co_deformable_detr_swin_small_3x_coco.pth"
     },
     "codetr-swin-b": {
+        "task": "detection",
         "config": "projects/configs/co_deformable_detr/co_deformable_detr_swin_base_3x_coco.py",
         "checkpoint": "model_weights/co_deformable_detr_swin_base_3x_coco.pth"
     },
     "codetr-swin-l": {
+        "task": "detection",
         "config": "projects/configs/co_deformable_detr/co_deformable_detr_swin_large_900q_3x_coco.py",
         "checkpoint": "model_weights/co_deformable_detr_swin_large_900q_3x_coco.pth"
     }

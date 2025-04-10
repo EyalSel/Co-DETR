@@ -17,54 +17,84 @@ generate_slurm_script.py.
 """
 import json
 import math
+import os
+
+from absl import app, flags
+
 from tools.copied_functions import dataset_scenarios_location
 
-# dataset = "waymo"
-# dataset = "MEVA"
-dataset = "visdrone"
-
-# Read scenarios from JSON file
-with open(dataset_scenarios_location(dataset), 'r') as f:
-    scenarios = json.load(f)
+FLAGS = flags.FLAGS
 
 # Dictionary mapping model names to their config and checkpoint paths
 with open('model_registry.json', 'r') as f:
     MODEL_CONFIGS = json.load(f)
 
-# Calculate how many scenarios per script (round up to ensure all scenarios are covered)
-scenarios_per_script = math.ceil(len(scenarios) / 16)
+flags.DEFINE_enum('dataset',
+                  default=None,
+                  enum_values=[
+                      "waymo",
+                      "argoverse",
+                      "MEVA",
+                      "visdrone",
+                      "kitti-step",
+                  ],
+                  help='Dataset to use (e.g., waymo, MEVA, visdrone)')
+flags.DEFINE_enum('task',
+                  default=None,
+                  enum_values=[
+                      'detection',
+                      'instance_segmentation',
+                  ],
+                  help='Task type (e.g., detection, instance_segmentation)')
+flags.DEFINE_multi_enum('models',
+                        default=None,
+                        enum_values=list(MODEL_CONFIGS.keys()),
+                        help='List of models to run inference with')
+
 
 # Base command
 def make_cmd(model_config, scenarios_str):
-    base_cmd = "bash tools/model_inference.sh {} {} 1 --dataset {} --eval bbox --scenarios {}".format(
-        model_config['config'],
-        model_config['checkpoint'],
-        dataset,
-        scenarios_str
-    )
+    base_cmd = "bash tools/model_inference.sh {} {} 1 --dataset {} --task {} --eval bbox --scenarios {}".format(
+        model_config['config'], model_config['checkpoint'], FLAGS.dataset,
+        FLAGS.task, scenarios_str)
     return base_cmd
 
-# Create 16 scripts
-for i in range(16):
-    start_idx = i * scenarios_per_script
-    end_idx = min((i + 1) * scenarios_per_script, len(scenarios))
 
-    # Get subset of scenarios for this script
-    script_scenarios = scenarios[start_idx:end_idx]
+def main(_):
+    # Read scenarios from JSON file
+    with open(dataset_scenarios_location(FLAGS.dataset), 'r') as f:
+        scenarios = json.load(f)
 
-    # Create command with space-separated scenarios
-    scenarios_str = " ".join(script_scenarios)
-    
-    # Write to shell script
-    with open(f'inference_part_{i+1}.sh', 'w') as f:
-        f.write("#!/bin/bash\n")
-        for model_name, model_config in MODEL_CONFIGS.items():
-            full_cmd = make_cmd(model_config, scenarios_str)
-            f.write(full_cmd)
-            f.write("\n")
+    # Calculate how many scenarios per script (round up to ensure all scenarios are covered)
+    scenarios_per_script = math.ceil(len(scenarios) / 16)
 
-    # Make the script executable
-    import os
-    os.chmod(f'inference_part_{i+1}.sh', 0o755)
+    # Create 16 scripts
+    for i in range(16):
+        start_idx = i * scenarios_per_script
+        end_idx = min((i + 1) * scenarios_per_script, len(scenarios))
 
-print("Created 16 inference scripts!")
+        # Get subset of scenarios for this script
+        script_scenarios = scenarios[start_idx:end_idx]
+
+        # Create command with space-separated scenarios
+        scenarios_str = " ".join(script_scenarios)
+
+        # Write to shell script
+        with open(f'inference_part_{i+1}.sh', 'w') as f:
+            f.write("#!/bin/bash\n")
+            for model_name in FLAGS.models:
+                assert model_name in MODEL_CONFIGS, model_name
+                assert FLAGS.task == MODEL_CONFIGS[model_name]['task'], (
+                    model_name, FLAGS.task)
+                full_cmd = make_cmd(MODEL_CONFIGS[model_name], scenarios_str)
+                f.write(full_cmd)
+                f.write("\n")
+
+        # Make the script executable
+        os.chmod(f'inference_part_{i+1}.sh', 0o755)
+
+    print("Created 16 inference scripts!")
+
+
+if __name__ == '__main__':
+    app.run(main)

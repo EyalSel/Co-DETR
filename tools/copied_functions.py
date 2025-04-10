@@ -102,6 +102,17 @@ def scenario_to_path(scenario_str, dataset="waymo"):
     elif dataset == "visdrone":
         split, scenario = scenario_str.split("-")
         run_path = (f"VisDrone2019-MOT-{split}/sequences/{scenario}")
+    elif dataset == "kitti-step":
+        splits = scenario_str.split("-")
+        assert len(splits) == 2, splits
+        split, scenario = splits
+        assert split in ["training", "validation", "testing"], split
+        middle_path = {
+            "training": "training/image_02",
+            "validation": "training/image_02",
+            "testing": "testing/image_02",
+        }[split]
+        run_path = f"kitti-step_material/{middle_path}/{scenario}"
     else:
         raise Exception(f"Unknown dataset name {dataset}")
     return run_path
@@ -144,15 +155,24 @@ class MEVASensor:
         self.cap.release()
 
 
-class JpgDirectorySensor:
+class ImageDirectorySensor:
 
     def __init__(self,
                  data_path,
                  clean_fn=lambda x: x.replace("img", ""),
+                 extension="jpg",
                  eager=True):
+        """
+        - clean_fn: A function that converts the jpeg filename to a string
+          frame index. For example, if the jpeg filename is "img_123.jpg", the
+          clean_fn should return "123".
+        - eager: If True, all the frames are pre-loaded into memory. If False,
+          the frames are loaded on demand.
+        """
         data_path = Path(data_path)
-        self.all_jpgs = sorted(data_path.glob("*.jpg"),
+        self.all_jpgs = sorted(data_path.glob(f"*.{extension}"),
                                key=lambda x: int(clean_fn(x.stem)))
+        assert len(self.all_jpgs) > 0, f"No {extension}s found in {data_path}"
         if eager:
             self.frames = [
                 cv2.imread(str(x)).astype(np.uint8) for x in self.all_jpgs
@@ -173,11 +193,32 @@ class JpgDirectorySensor:
             return {"center_camera_feed": self.frames[frame_index]}
 
 
+class JpgDirectorySensor(ImageDirectorySensor):
+
+    def __init__(self, data_path, clean_fn=None, eager=True):
+        # pass clean_fn to superclass if it's not None
+        kwargs = {}
+        if clean_fn is not None:
+            kwargs["clean_fn"] = clean_fn
+        super().__init__(data_path, extension="jpg", eager=eager, **kwargs)
+
+
+class PngDirectorySensor(ImageDirectorySensor):
+
+    def __init__(self, data_path, clean_fn=None, eager=True):
+        # pass clean_fn to superclass if it's not None
+        kwargs = {}
+        if clean_fn is not None:
+            kwargs["clean_fn"] = clean_fn
+        super().__init__(data_path, extension="png", eager=eager, **kwargs)
+
+
 dataset_readers = {
     "waymo": OfflineWaymoSensorV1_1,
     "argoverse": OfflineWaymoSensorV1_1,
     "MEVA": MEVASensor,
     "visdrone": JpgDirectorySensor,
+    "kitti-step": PngDirectorySensor,
 }
 
 dataset_resolutions = {
@@ -185,7 +226,9 @@ dataset_resolutions = {
     "argoverse": (1280, 1920),
     "MEVA": (1072, 1920),
     "visdrone": (1512, 2688),
+    "kitti-step": (375, 1242),
 }
+
 
 def dataset_scenarios_location(dataset):
     """
@@ -196,6 +239,7 @@ def dataset_scenarios_location(dataset):
         "argoverse": "argoverse_scenarios.json",
         "MEVA": "MEVA_scenarios.json",
         "visdrone": "visdrone_scenarios.json",
+        "kitti-step": "kitti-step_scenarios.json",
     }
     return Path("dataset_scenarios") / json_file[dataset]
 

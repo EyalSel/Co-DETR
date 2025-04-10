@@ -9,6 +9,7 @@ from pathlib import Path
 
 import cv2
 import mmcv
+import numpy as np
 import torch
 from copied_functions import (FractioningSchema, FrameFraction,
                               dataset_readers, dataset_resolutions,
@@ -27,6 +28,7 @@ from mmdet.models import build_detector
 from mmdet.utils import (build_dp, compat_cfg, get_device, replace_cfg_vals,
                          setup_multi_processes, update_data_root)
 from projects import *
+from segmentation_utils import clean_segmentation_preds, save_with_gzip
 
 
 class EqualFractions(FractioningSchema):
@@ -276,6 +278,7 @@ def parse_args():
     parser.add_argument('config', help='test config file path')
     parser.add_argument('checkpoint', help='checkpoint file')
     parser.add_argument('--dataset', help='dataset to process')
+    parser.add_argument('--task', help='task to process')
     parser.add_argument(
         '--work-dir',
         help='the directory to save the file containing evaluation metrics')
@@ -438,7 +441,7 @@ def main():
                                         workers_per_gpu=2,
                                         dist=distributed,
                                         shuffle=False)
-    
+
     # MEVA uses opencv to read images, so we need to set workers_per_gpu to 0
     # to avoid deadlocks (program just hangs)
     if args.dataset == "MEVA":
@@ -556,16 +559,22 @@ def main():
     #     FrameFraction(0, 960-60, 1280, 1920, None, None)
     # ]
     # crop + scale
-    sharding_schema = "full_frame"
-    split_specs = {
-        "full_frame": EqualFractions((1, 1), (0, 0), False),
-        "quarters": EqualFractions((2, 2), (30, 30), False),
-        "16ths": EqualFractions((4, 4), (30, 30), True)
-    }[sharding_schema]
-    split_specs = split_specs.get_split_specs(1280, 1920)
 
-    run_model_fn = run_split_specs_fn(
-        lambda x: model(return_loss=False, rescale=True, **x), split_specs)
+    if args.task == "detection":
+        sharding_schema = "full_frame"
+        split_specs = {
+            "full_frame": EqualFractions((1, 1), (0, 0), False),
+            "quarters": EqualFractions((2, 2), (30, 30), False),
+            "16ths": EqualFractions((4, 4), (30, 30), True)
+        }[sharding_schema]
+        dataset_resolution = dataset_resolutions[args.dataset]
+        split_specs = split_specs.get_split_specs(*dataset_resolution)
+        run_model_fn = run_split_specs_fn(
+            lambda x: model(return_loss=False, rescale=True, **x), split_specs)
+    elif args.task == "instance_segmentation":
+        run_model_fn = lambda x: model(return_loss=False, rescale=True, **x)
+    else:
+        raise ValueError(f"Unknown task: {args.task}")
 
     # for data in tqdm(data_loader):
     #     with torch.no_grad():
@@ -580,12 +589,17 @@ def main():
     # build the dataloader
     # dataset = build_dataset(cfg.data.test)
 
-    base_path = Path(f"co_detr-predictions-{args.dataset}")
+    base_path = Path(f"co_detr-predictions-{args.dataset}-{args.task}")
     base_path.mkdir(exist_ok=True)
     model_name = Path(args.config).stem
     for scenario in args.scenarios:
         fn = f"preds--{scenario}__{model_name}"
-        if (base_path / (fn + ".npy")).exists():
+        ext = {
+            "detection": ".npy",
+            "instance_segmentation": ".pl.gz"
+        }[args.task]
+        full_fn = fn + ext
+        if (base_path / full_fn).exists():
             print("Skipping", scenario)
             continue
 
@@ -603,10 +617,16 @@ def main():
         for data in tqdm(data_loader):
             with torch.no_grad():
                 frame_preds = run_model_fn(data)
-                all_preds.append(frame_preds)
+            if args.task == "instance_segmentation":
+                frame_preds = clean_segmentation_preds(np.array(frame_preds))
+            all_preds.append(frame_preds)
 
         all_preds = np.array(all_preds)
-        np.save(str(base_path / fn), all_preds)
+
+        if args.task == "detection":
+            np.save(str(base_path / fn), all_preds)  # numpy adds npy extension
+        elif args.task == "instance_segmentation":
+            save_with_gzip(all_preds, base_path / full_fn)
 
         # Delete the scenario if it was downloaded
         if not path_exists:
