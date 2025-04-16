@@ -244,34 +244,6 @@ def dataset_scenarios_location(dataset):
     return Path("dataset_scenarios") / json_file[dataset]
 
 
-class FrameFraction:
-    """
-    Specifies the crop location in the frame, as well as the final height and
-    scale that the crop should be resized to.
-    """
-
-    def __init__(self, ymin, xmin, ymax, xmax, height=None, width=None):
-        self.ymin = ymin
-        self.xmin = xmin
-        self.ymax = ymax
-        self.xmax = xmax
-        self.height = height
-        self.width = width
-
-
-class FractioningSchema:
-    """
-    Abstract parent class.
-    """
-
-    def get_split_specs(self, h, w):
-        """
-        Takes frame height and width and returns a list of FrameFraction
-        instances.
-        """
-        raise NotImplementedError("Implemented by child class")
-
-
 def sync_from_google_storage(base_path, path, directory=False):
     """
     Download a file in path in ad-config-search's bucket saved in google cloud
