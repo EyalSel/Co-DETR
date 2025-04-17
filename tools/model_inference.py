@@ -4,15 +4,14 @@ import os
 import os.path as osp
 import time
 import warnings
-from itertools import product
 from pathlib import Path
 
-import cv2
 import mmcv
 import numpy as np
 import torch
 from copied_functions import (dataset_readers, dataset_resolutions,
                               scenario_to_path, sync_from_google_storage)
+from detection_utils import convert_raw_preds_to_edet_format
 from mmcv import Config, DictAction
 from mmcv.cnn import fuse_conv_bn
 from mmcv.parallel.data_container import DataContainer
@@ -30,18 +29,80 @@ from projects import *
 from segmentation_utils import clean_segmentation_preds, save_with_gzip
 
 
-def convert_codetr_result_to_edet_format(frame_preds):
-    frame_preds = np.concatenate([
-        np.concatenate([
-            np.full(len(boxes), -1).reshape(-1, 1), boxes,
-            np.full(len(boxes), i).reshape(-1, 1)
-        ],
-                       axis=1) for i, boxes in enumerate(frame_preds)
-    ],
-                                 axis=0)
-    frame_preds = frame_preds[np.argsort(frame_preds[:, 5])[::-1]][:100]
-    frame_preds = frame_preds[:, [0, 2, 1, 4, 3, 5, 6]]
-    return frame_preds
+def adjust_input_image_size(input_entry, target_resolution):
+    """
+    This function converts the input minibatch of datapoints to the target
+    resolution.
+    """
+    # break input_image into the image and the data container
+    image = input_entry["img"][0]
+    data_container = input_entry["img_metas"][0].data
+    # adjust size of image
+    image = torch.nn.functional.interpolate(image,
+                                            size=target_resolution,
+                                            mode='bilinear',
+                                            align_corners=False)
+    # adjust size of data container
+    data_container[0][0]["img_shape"] = (target_resolution[0],
+                                         target_resolution[1], 3)
+    data_container[0][0]["ori_shape"] = (target_resolution[0],
+                                         target_resolution[1], 3)
+    data_container[0][0]["pad_shape"] = (target_resolution[0],
+                                         target_resolution[1], 3)
+    # merge image and data container
+    return {"img": [image], "img_metas": input_entry["img_metas"]}
+
+
+def detection_image_resize_wrapper(run_fn, target_resolution):
+    """
+    This function is a wrapper that (i) resizes the input image to the
+    target resolution (ii) runs inference with the resized image (iii) scales
+    the bounding boxes back to the original resolution.
+
+    run_fn: A function that takes a minibatch of datapoints from the test
+    dataset and returns a list of predictions.
+
+    target_resolution: A tuple (h, w) representing the height and width of the
+    image.
+    """
+
+    def fn(inp):
+        _, _, prev_h, prev_w = inp["img"][0].shape
+        # resize image
+        inp = adjust_input_image_size(inp, target_resolution)
+        # run model
+        out = run_fn(inp)
+        # resize boxes back to original resolution
+        from tools.detection_utils import scale_predictions
+        out = [
+            scale_predictions(pred, target_resolution, (prev_h, prev_w))
+            for pred in out
+        ]
+        return out
+
+    return fn
+
+
+def get_resolution_of_datapoint(data):
+    """
+    data: A single datapoint from the test dataset.
+
+    Returns:
+        A tuple (h, w) representing the height and width of the image.
+    """
+    _, _, h, w = data["img"][0].shape
+    return h, w
+
+
+def assert_resolution_matches(data, resolution):
+    """
+    data: A single datapoint from the test dataset.
+
+    resolution: A tuple (h, w) representing the height and width of the image.
+    """
+    h, w = get_resolution_of_datapoint(data)
+    assert h == resolution[0] and w == resolution[1], (
+        f"Resolution mismatch: {h}x{w} != {resolution[0]}x{resolution[1]}")
 
 
 class CustomDataset(Dataset):
@@ -52,17 +113,19 @@ class CustomDataset(Dataset):
     def __init__(self, dataset, scenario_path) -> None:
         self.dataset = dataset
         self.scenario_path = Path(scenario_path)
-        self.scenario_name = self.scenario_path.parent.name + "-" + self.scenario_path.stem
+        self.scenario_name = (self.scenario_path.parent.name + "-" +
+                              self.scenario_path.stem)
         self.reader = dataset_readers[dataset](scenario_path)
-        self.dataset_resolution = dataset_resolutions[dataset]
 
     def __getitem__(self, index):
+        img = self.reader.get_frame(index)["center_camera_feed"]
+        h, w, _ = img.shape
         d = {
             'filename': self.scenario_name + f"-{index}.jpg",
             'ori_filename': self.scenario_name + f"-{index}.jpg",
-            'ori_shape': (*self.dataset_resolution, 3),
-            'img_shape': (*self.dataset_resolution, 3),
-            'pad_shape': (*self.dataset_resolution, 3),
+            'ori_shape': (h, w, 3),
+            'img_shape': (h, w, 3),
+            'pad_shape': (h, w, 3),
             'scale_factor': np.array([1, 1, 1, 1], dtype=np.float32),
             'flip': False,
             'flip_direction': None,
@@ -71,7 +134,7 @@ class CustomDataset(Dataset):
                 'std': np.array([58.395, 57.12, 57.375], dtype=np.float32),
                 'to_rgb': True
             },
-            'batch_input_shape': self.dataset_resolution
+            'batch_input_shape': (h, w)
         }
         img = img.transpose([2, 0, 1])
         # bgr to rgb
@@ -85,39 +148,6 @@ class CustomDataset(Dataset):
 
     def __len__(self):
         return self.reader.total_num_frames()
-
-
-def show_preds(data, result, out_dir, model, PALETTE, show, show_score_thr):
-    from mmcv.image import tensor2imgs
-    batch_size = len(result)
-    if batch_size == 1 and isinstance(data['img'][0], torch.Tensor):
-        img_tensor = data['img'][0]
-    else:
-        img_tensor = data['img'][0].data[0]
-    img_metas = data['img_metas'][0].data[0]
-    imgs = tensor2imgs(img_tensor, **img_metas[0]['img_norm_cfg'])
-    assert len(imgs) == len(img_metas)
-
-    for i, (img, img_meta) in enumerate(zip(imgs, img_metas)):
-        h, w, _ = img_meta['img_shape']
-        img_show = img[:h, :w, :]
-
-        ori_h, ori_w = img_meta['ori_shape'][:-1]
-        img_show = mmcv.imresize(img_show, (ori_w, ori_h))
-
-        if out_dir:
-            out_file = osp.join(out_dir, img_meta['ori_filename'])
-        else:
-            out_file = None
-
-        model.module.show_result(img_show,
-                                 result[i],
-                                 bbox_color=PALETTE,
-                                 text_color=PALETTE,
-                                 mask_color=PALETTE,
-                                 show=show,
-                                 out_file=out_file,
-                                 score_thr=show_score_thr)
 
 
 def parse_args():
@@ -423,24 +453,23 @@ def main():
         # split_specs = split_specs.get_split_specs(*dataset_resolution)
         # run_model_fn = run_split_specs_fn(
         #     lambda x: model(return_loss=False, rescale=True, **x), split_specs)
-        run_model_fn = lambda x: model(return_loss=False, rescale=True, **x)
+        run_model_fn = lambda x: [
+            convert_raw_preds_to_edet_format(pred)
+            for pred in model(return_loss=False, rescale=True, **x)
+        ]
     elif args.task == "instance_segmentation":
         run_model_fn = lambda x: model(return_loss=False, rescale=True, **x)
     else:
         raise ValueError(f"Unknown task: {args.task}")
 
-    # for data in tqdm(data_loader):
-    #     with torch.no_grad():
-    #         result = model(return_loss=False, rescale=True, **data)
-    #         if args.show or args.show_dir:
-    #             show_preds(data, result, args.show_dir, model, dataset.PALETTE,
-    #                        args.show, args.show_score_thr)
-    #     for frame_preds in result:
-    #         frame_preds = convert_codetr_result_to_edet_format(frame_preds)
-    #         all_preds.append(frame_preds)
-
-    # build the dataloader
-    # dataset = build_dataset(cfg.data.test)
+    dataset_resolution = dataset_resolutions[args.dataset]
+    if dataset_resolution["variable_resolution"]:
+        assert args.task == "detection", (
+            "Variable resolution is currently only supported for detection. "
+            "To add support for instance segmentation, we need to add a "
+            "function to resize the instance masks.")
+        run_model_fn = detection_image_resize_wrapper(
+            run_model_fn, dataset_resolution["resolution"])
 
     base_path = Path(f"co_detr-predictions-{args.dataset}-{args.task}")
     base_path.mkdir(exist_ok=True)
@@ -468,11 +497,25 @@ def main():
         all_preds = []
 
         for data in tqdm(data_loader):
+            if not dataset_resolution["variable_resolution"]:
+                assert_resolution_matches(data,
+                                          dataset_resolution["resolution"])
+            else:
+                print(
+                    "Variable resolution",
+                    scenario,
+                    get_resolution_of_datapoint(data),
+                    "->",
+                    dataset_resolution["resolution"],
+                )
             with torch.no_grad():
                 frame_preds = run_model_fn(data)
             if args.task == "instance_segmentation":
-                frame_preds = clean_segmentation_preds(np.array(frame_preds))
-            all_preds.append(frame_preds)
+                frame_preds = [
+                    clean_segmentation_preds(frame_pred)
+                    for frame_pred in frame_preds
+                ]
+            all_preds.extend(frame_preds)
 
         all_preds = np.array(all_preds)
 

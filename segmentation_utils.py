@@ -161,6 +161,10 @@ def clean_segmentation_preds(frame_preds):
      3. Optimizes mask encoding by converting binary mask to RLE in binary
         format.
     """
+    assert isinstance(frame_preds, tuple), type(frame_preds)
+    # Subsequent code is written assuming frame_preds is converted to a numpy
+    # array.
+    frame_preds = np.array(frame_preds)
     mask_preds = get_mask_preds(frame_preds)
     mask_preds = filter_mask_preds_by_confidence(mask_preds)
     mask_preds = optimize_mask_encoding(mask_preds)

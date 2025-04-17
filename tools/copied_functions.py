@@ -221,12 +221,17 @@ dataset_readers = {
     "kitti-step": PngDirectorySensor,
 }
 
+# variable_resolution is True if the resolution is not the same for all
+# scenarios in the dataset.
+# resolution is a tuple of (height, width). If variable_resolution is True,
+# then the images will be resized to the resolution specified in the tuple for
+# inference
 dataset_resolutions = {
-    "waymo": (1280, 1920),
-    "argoverse": (1280, 1920),
-    "MEVA": (1072, 1920),
-    "visdrone": (1512, 2688),
-    "kitti-step": (375, 1242),
+    "waymo": dict(variable_resolution=False, resolution=(1280, 1920)),
+    "argoverse": dict(variable_resolution=False, resolution=(1280, 1920)),
+    "MEVA": dict(variable_resolution=False, resolution=(1072, 1920)),
+    "kitti-step": dict(variable_resolution=False, resolution=(375, 1242)),
+    "visdrone": dict(variable_resolution=True, resolution=(1080, 1920)),
 }
 
 

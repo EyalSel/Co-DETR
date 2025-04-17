@@ -4,6 +4,8 @@ import cv2
 import mmcv
 import numpy as np
 import torch
+from detection_utils import (convert_raw_preds_to_edet_format,
+                             edet_format_to_xywh)
 from mmcv.runner import DataContainer
 
 
@@ -134,33 +136,16 @@ def run_split_specs_fn(run_fn, split_specs):
                     result[i] = result[i][result[i][:, 2] < split_spec.xmax -
                                           margin_dist]
             all_results.append(result)
-        all_preds = []
-        for class_id, all_class_preds in enumerate(zip(*all_results)):
-            if len(all_class_preds) > 1:
-                all_class_preds = np.concatenate(all_class_preds, axis=0)
-            else:
-                all_class_preds = all_class_preds[0]
-            all_preds.append(
-                np.concatenate([
-                    np.full([len(all_class_preds), 1], -1),
-                    all_class_preds,
-                    np.full([len(all_class_preds), 1], class_id),
-                ],
-                               axis=1))
-            # breakpoint()
+        all_preds = [
+            convert_raw_preds_to_edet_format(result) for result in all_results
+        ]
         all_preds = np.concatenate(all_preds, axis=0)
-        # breakpoint()
-        xmin_ymin_wh_boxes = np.concatenate([
-            all_preds[:, [1, 2]], all_preds[:, [3]] - all_preds[:, [1]],
-            all_preds[:, [4]] - all_preds[:, [2]]
-        ],
-                                            axis=1)
+        xmin_ymin_wh_boxes = edet_format_to_xywh(all_preds)
 
         indices = cv2.dnn.NMSBoxes(xmin_ymin_wh_boxes, all_preds[:, 5], 0.3,
                                    0.5)
 
         all_preds = all_preds[indices]
-        all_preds = all_preds[:, [0, 2, 1, 4, 3, 5, 6]]
         all_preds = all_preds[np.argsort(all_preds[:, 5])[::-1]][:100]
 
         # The commented code below converts the results into a format that can
