@@ -230,7 +230,7 @@ dataset_resolutions = {
     "waymo": dict(variable_resolution=False, resolution=(1280, 1920)),
     "argoverse": dict(variable_resolution=False, resolution=(1280, 1920)),
     "MEVA": dict(variable_resolution=False, resolution=(1072, 1920)),
-    "kitti-step": dict(variable_resolution=False, resolution=(375, 1242)),
+    "kitti-step": dict(variable_resolution=True, resolution=(375, 1242)),
     "visdrone": dict(variable_resolution=True, resolution=(1080, 1920)),
 }
 
