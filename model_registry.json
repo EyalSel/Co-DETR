@@ -2,7 +2,7 @@
     "codino-vit-l-seg": {
         "task": "instance_segmentation",
         "config": "projects/configs/co_dino_vit/co_dino_5scale_vit_large_coco_instance.py",
-        "checkpoint": "model_weights/co_dino_5scale_vit_large_coco.pth"
+        "checkpoint": "model_weights/co_dino_5scale_vit_large_coco_instance.pth"
     },
     "codino-vit-l": {
         "task": "detection",
